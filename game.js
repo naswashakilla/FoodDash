@@ -411,6 +411,8 @@ class BootScene extends Phaser.Scene {
       ['p_star',       drawParticleStar()],
       ['p_heart',      drawParticleHeart()],
       ['p_sparkle',    drawParticleSparkle()],
+      ['chili',        drawChili()],
+      ['sugar_bullet', drawSugarBullet()],
     ];
     for(const [key,canvas] of map){
       this.textures.addCanvas(key, canvas);
@@ -573,6 +575,32 @@ class GameScene extends Phaser.Scene {
     this.cameras.main.startFollow(this.player, true, 0.09, 0.09);
     this.cameras.main.setDeadzone(220, 100);
 
+    // ── Dynamic Level Hazards ──
+    this.fallingHazards = this.physics.add.group({ allowGravity: true });
+    this.physics.add.collider(this.fallingHazards, this.platforms, (hazard, platform) => {
+      this._burst(hazard.x, hazard.y, 'p_sparkle', 4);
+      hazard.destroy();
+    });
+    this.physics.add.overlap(this.player, this.fallingHazards, (player, hazard) => {
+      this._hurtPlayer();
+      hazard.destroy();
+    });
+
+    this.projectiles = this.physics.add.group({ allowGravity: false, immovable: true });
+    this.physics.add.overlap(this.player, this.projectiles, (player, proj) => {
+      this._hurtPlayer();
+      proj.destroy();
+    });
+
+    if(this.levelIdx === 1) { // Level 2: Spicy Kitchen
+      this.chiliTimer = this.time.addEvent({
+        delay: 3000,
+        callback: this._spawnChili,
+        callbackScope: this,
+        loop: true
+      });
+    }
+
     // level banner
     this._showBanner(`LEVEL ${this.lvDef.id} — ${this.lvDef.name}`);
   }
@@ -641,9 +669,26 @@ class GameScene extends Phaser.Scene {
     }
 
     // ── Spikes ──
+    this.movingSpikes = [];
+    this.movingSpikeGroup = this.physics.add.group({ allowGravity: false, immovable: true });
+
     for(const sx of lv.spikes){
-      const s=this.spikeGroup.create(sx+32, H-GT-12, 'spikes');
-      s.setOrigin(0.5).setScale(1,1).refreshBody();
+      if(this.levelIdx === 2) { // Level 3: Sugar Rush (horizontal moving spikes)
+        const s = this.movingSpikeGroup.create(sx+32, H-GT-12, 'spikes');
+        s.setOrigin(0.5).setScale(1,1);
+        s.setTint(0x00FFCC); // Neon cyan
+        s.startX = sx + 32;
+        s.moveRange = 64; // horizontal move range
+        s.moveDirection = Math.random() > 0.5 ? 1 : -1;
+        s.moveSpeed = 1.2; // pixels per update
+        this.movingSpikes.push(s);
+      } else {
+        const s = this.spikeGroup.create(sx+32, H-GT-12, 'spikes');
+        s.setOrigin(0.5).setScale(1,1).refreshBody();
+        if(this.levelIdx === 1) { // Level 2: Spicy Kitchen (fiery orange tint)
+          s.setTint(0xFF5500);
+        }
+      }
     }
 
     // ── Goal cake (end of level) ──
@@ -685,6 +730,9 @@ class GameScene extends Phaser.Scene {
     this.physics.add.overlap(this.player, this.spikeGroup, ()=>{
       if(!this.invincible) this._hurtPlayer();
     });
+    this.physics.add.overlap(this.player, this.movingSpikeGroup, ()=>{
+      if(!this.invincible) this._hurtPlayer();
+    });
     this.physics.add.overlap(this.player, this.cakeObj, ()=>{
       if(!this.levelDone) this._completeLevel();
     });
@@ -702,18 +750,32 @@ class GameScene extends Phaser.Scene {
       e.setScale(0.72);
       e.enemyType = type==='hotdog' ? 'fly' : 'ground';
 
+      // Set base speeds depending on the level
+      let groundSpd = 65;
+      let flySpd = 85;
+      if(this.levelIdx === 1) { // Level 2
+        groundSpd = 100;
+        flySpd = 120;
+      } else if(this.levelIdx === 2) { // Level 3
+        groundSpd = 140;
+        flySpd = 155;
+      }
+
       if(e.enemyType==='ground'){
-        e.setVelocityX(Math.random()>0.5 ? 65 : -65);
+        e.setVelocityX(Math.random()>0.5 ? groundSpd : -groundSpd);
         e.setCollideWorldBounds(true).setBounceX(1);
         e.body.setSize(30,24).setOffset(4,8);
+        e.baseSpeed = groundSpd;
       } else {
         // flying — counteract gravity
-        e.setVelocityX(Math.random()>0.5 ? 85 : -85);
+        e.setVelocityX(Math.random()>0.5 ? flySpd : -flySpd);
         e.setGravityY(-GRAVITY+100);
         e.setCollideWorldBounds(true).setBounceX(1);
         e.body.setSize(40,14).setOffset(4,4);
         e.baseY=ey;
         e.waveOffset=Math.random()*Math.PI*2;
+        e.baseSpeed = flySpd;
+        e.lastShotTime = 0;
       }
       e.setDepth(12);
     }
@@ -874,6 +936,86 @@ class GameScene extends Phaser.Scene {
     if(this.lives<=0) this.time.delayedCall(700,()=>this._gameOver());
   }
 
+  _spawnChili() {
+    if(!this.isAlive || this.levelDone) return;
+    // Spawn just ahead of the player's view
+    const spawnX = this.player.x + Phaser.Math.Between(220, 360);
+    // Ensure we don't spawn past the end of the level
+    if(spawnX > this.lvDef.worldW - 150) return;
+
+    // Create warning graphics (vertical line + caution indicator)
+    const line = this.add.graphics().setDepth(150);
+    
+    // Create warning text at the bottom area where the player's eyes are focused
+    const textY = GH - 160;
+    const warnText = this.add.text(spawnX, textY, '⚠️ DROP', {
+      fontFamily: 'Fredoka One,cursive',
+      fontSize: '14px',
+      fill: '#FF3300',
+      stroke: '#FFFFFF',
+      strokeThickness: 2
+    }).setOrigin(0.5).setDepth(151);
+
+    // Blinking effect
+    let blinkState = true;
+    const timer = this.time.addEvent({
+      delay: 150,
+      repeat: 6,
+      callback: () => {
+        blinkState = !blinkState;
+        warnText.setVisible(blinkState);
+        line.clear();
+        if (blinkState) {
+          line.lineStyle(2, 0xFF3300, 0.6);
+          // Draw dashed vertical caution line
+          for (let y = 0; y < GH; y += 20) {
+            line.lineBetween(spawnX, y, spawnX, y + 10);
+          }
+        }
+      },
+      callbackScope: this
+    });
+
+    // Spawn chili when the warning sequence finishes (approx 1 second)
+    this.time.delayedCall(1050, () => {
+      warnText.destroy();
+      line.destroy();
+      timer.destroy();
+
+      if (this.isAlive && !this.levelDone) {
+        const chili = this.fallingHazards.create(spawnX, -20, 'chili');
+        chili.setScale(0.85);
+        chili.setGravityY(350); // falls with gravity
+        chili.setAngularVelocity(Phaser.Math.Between(100, 250)); // spinning!
+
+        // Auto destroy if it somehow falls out of bounds
+        this.time.delayedCall(4000, () => {
+          if (chili.active) chili.destroy();
+        });
+      }
+    });
+  }
+
+  _shootProjectile(e) {
+    if(!this.isAlive || this.levelDone) return;
+    // Create a sugar bullet
+    const proj = this.projectiles.create(e.x, e.y, 'sugar_bullet');
+    proj.setScale(1.1);
+
+    // Calculate angle towards player
+    const angle = Phaser.Math.Angle.Between(e.x, e.y, this.player.x, this.player.y);
+    const speed = 240;
+    proj.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
+
+    // Mini visual effect on shoot
+    this._burst(e.x, e.y, 'p_sparkle', 2);
+
+    // Auto destroy after 3.5 seconds
+    this.time.delayedCall(3500, () => {
+      if(proj.active) proj.destroy();
+    });
+  }
+
   _completeLevel(){
     this.levelDone=true; this.isAlive=false;
     SFX.levelup();
@@ -1020,14 +1162,80 @@ class GameScene extends Phaser.Scene {
       }
     }
 
-    // flying enemies sine wave
+    // flying & ground enemies updates with custom AI and cleanup
     this.enemies.getChildren().forEach(e=>{
+      // Cleanup out of bounds enemies falling into pits
+      if (e.y > GH + 100) {
+        e.destroy();
+        return;
+      }
+
       if(e.enemyType==='fly'){
-        e.y=e.baseY+Math.sin(time*0.0018+e.waveOffset)*38;
+        let waveAmp = 38;
+        let waveFreq = 0.0018;
+        if(this.levelIdx === 1) {
+          waveAmp = 50;
+          waveFreq = 0.0022;
+        } else if(this.levelIdx === 2) {
+          waveAmp = 60;
+          waveFreq = 0.0026;
+        }
+        e.y=e.baseY+Math.sin(time*waveFreq+e.waveOffset)*waveAmp;
         e.body.reset(e.x,e.y);
+
+        // Level 3 flying enemy shoots neon candy projectiles
+        if(this.levelIdx === 2) {
+          const dist = Phaser.Math.Distance.Between(pl.x, pl.y, e.x, e.y);
+          if(dist < 380 && time - (e.lastShotTime || 0) > 1800) {
+            e.lastShotTime = time;
+            this._shootProjectile(e);
+          }
+        }
+      } else if(e.enemyType==='ground') {
+        // Level 2 ground enemy: Jumps reactively if player is close
+        if(this.levelIdx === 1) {
+          const dist = Phaser.Math.Distance.Between(pl.x, pl.y, e.x, e.y);
+          if(dist < 180 && e.body.blocked.down && Math.random() < 0.02) {
+            e.setVelocityY(-230);
+          }
+        }
+        // Level 3 ground enemy: Charges at player
+        else if(this.levelIdx === 2) {
+          const dist = Phaser.Math.Distance.Between(pl.x, pl.y, e.x, e.y);
+          if(dist < 260) {
+            // charge in direction of player
+            const dir = pl.x < e.x ? -1 : 1;
+            e.setVelocityX(dir * 220);
+            e.setTint(0xFF5555); // Red glow when angry charging
+          } else {
+            // standard speed, keep direction
+            const currentDir = e.body.velocity.x < 0 ? -1 : 1;
+            e.setVelocityX(currentDir * e.baseSpeed);
+            e.clearTint();
+          }
+        }
       }
       e.setFlipX(e.body.velocity.x<0);
     });
+
+    // Flicker Level 2 fiery spikes to look hot!
+    if(this.levelIdx === 1 && this.spikeGroup) {
+      this.spikeGroup.getChildren().forEach(s => {
+        s.setAlpha(0.85 + Math.random() * 0.15);
+      });
+    }
+
+    // Update moving spikes in Level 3
+    if(this.levelIdx === 2 && this.movingSpikes) {
+      this.movingSpikes.forEach(s => {
+        s.x += s.moveSpeed * s.moveDirection;
+        if(Math.abs(s.x - s.startX) > s.moveRange) {
+          s.moveDirection *= -1; // Reverse direction
+          s.x = s.startX + s.moveRange * s.moveDirection;
+        }
+        s.body.x = s.x - s.body.halfWidth;
+      });
+    }
 
     // pit death
     if(pl.y > GH+60){

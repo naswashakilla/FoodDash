@@ -859,3 +859,55 @@ function drawFlag(){
   g.strokeStyle='#30A040'; g.lineWidth=1; g.stroke();
   return c;
 }
+
+/* ════════════════════════════════════════════
+   LEVEL 2 FALLING HAZARD — Curvy Hot Chili Pepper
+   ════════════════════════════════════════════ */
+function drawChili(){
+  const W=24, H=32;
+  const c=mkc(W,H); const g=c.getContext('2d');
+  const cx=W/2;
+  
+  // draw a curved red chili pepper
+  g.fillStyle='#FF3300';
+  g.beginPath();
+  g.moveTo(cx-6, 10);
+  g.quadraticCurveTo(cx, 8, cx+6, 10);
+  g.quadraticCurveTo(cx+8, 20, cx, 28);
+  g.quadraticCurveTo(cx-4, 20, cx-6, 10);
+  g.closePath();
+  g.fill();
+  
+  // green stem
+  g.strokeStyle='#228B22'; g.lineWidth=2.5;
+  g.beginPath();
+  g.moveTo(cx, 10);
+  g.quadraticCurveTo(cx-2, 4, cx-6, 3);
+  g.stroke();
+  
+  // shine
+  g.fillStyle='rgba(255,255,255,0.4)';
+  g.beginPath();
+  g.ellipse(cx-2, 14, 2, 5, 0.2, 0, Math.PI*2);
+  g.fill();
+  return c;
+}
+
+/* ════════════════════════════════════════════
+   LEVEL 3 PROJECTILE — Neon Sugar Bullet
+   ════════════════════════════════════════════ */
+function drawSugarBullet(){
+  const W=16, H=16;
+  const c=mkc(W,H); const g=c.getContext('2d');
+  const cx=W/2, cy=H/2;
+  
+  // glow
+  const gl=g.createRadialGradient(cx,cy,2,cx,cy,8);
+  gl.addColorStop(0,'rgba(0,255,255,1)');
+  gl.addColorStop(1,'rgba(0,255,255,0)');
+  g.fillStyle=gl; circ(g,cx,cy,8); g.fill();
+  
+  // core
+  g.fillStyle='#FFFFFF'; circ(g,cx,cy,3); g.fill();
+  return c;
+}
